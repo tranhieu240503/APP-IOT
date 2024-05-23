@@ -1,0 +1,189 @@
+import 'package:flutter/material.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'dart:convert';
+
+import 'package:mqtt_client/mqtt_server_client.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'MQTT Example',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  @override
+  _HomePageState createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  late MqttServerClient client;
+  double temperature = 0.0;
+  double humidity = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Initialize MQTT client
+    client = MqttServerClient('broker.emqx.io', 'flutter_client');
+    client.port = 1883;
+
+    client.onDisconnected = _onDisconnected;
+    _connectToMqttBroker();
+  }
+
+  void _connectToMqttBroker() async {
+    try {
+      await client.connect();
+      print('Connected to MQTT broker');
+
+      // Subscribe to the topic 'temperature_humidity'
+      client.subscribe('temperature_humidity', MqttQos.atMostOnce);
+
+      // Listen for incoming messages
+      client.updates?.listen((List<MqttReceivedMessage<MqttMessage>> messages) {
+        final MqttPublishMessage message = messages[0].payload as MqttPublishMessage;
+        final String payload = MqttPublishPayload.bytesToStringAsString(message.payload.message!);
+
+        print('Received message: $payload');
+
+        try {
+          final Map<String, dynamic> data = jsonDecode(payload);
+          setState(() {
+            temperature = double.parse(data['temperature'].toString());
+            humidity = double.parse(data['humidity'].toString());
+          });
+        } catch (e) {
+          print('Error parsing MQTT message: $e');
+        }
+      });
+    } catch (e) {
+      print('Failed to connect to MQTT broker: $e');
+    }
+  }
+
+  void _onDisconnected() {
+    print('Disconnected from MQTT broker');
+    // Reconnect to MQTT broker after a delay (e.g., 5 seconds)
+    Future.delayed(const Duration(seconds: 5), () {
+      _connectToMqttBroker();
+    });
+  }
+
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Smart Home Control'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            ElevatedButton(
+              onPressed: () {
+                // Implement refresh logic here if needed
+              },
+              child: Text('Refresh Temperature & Humidity'),
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Current Temperature: ${temperature.toStringAsFixed(2)} °C',
+              style: TextStyle(fontSize: 24),
+            ),
+            Text(
+              'Current Humidity: ${humidity.toStringAsFixed(2)} %',
+              style: TextStyle(fontSize: 24),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => LightControlPage()),
+                );
+              },
+              child: Text('Open Light Control'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    client.disconnect();
+    super.dispose();
+  }
+}
+
+class LightControlPage extends StatefulWidget {
+  @override
+  _LightControlPageState createState() => _LightControlPageState();
+}
+
+class _LightControlPageState extends State<LightControlPage> {
+  bool _isLightOn = false;
+
+  void _toggleLight(bool turnOn) {
+    setState(() {
+      _isLightOn = turnOn;
+    });
+
+    // Implement MQTT publish logic here to control the light
+    // You can publish a message to the appropriate topic based on the _isLightOn value
+    // Example: client.publishMessage('light_control_topic', MqttQos.exactlyOnce, 'ON/OFF');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Light Control'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            _isLightOn
+                ? Image.asset(
+                    'assets/light_on.png',
+                    width: 100,
+                    height: 100,
+                  )
+                : Image.asset(
+                    'assets/light_off.jpg',
+                    width: 100,
+                    height: 100,
+                  ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => _toggleLight(!_isLightOn),
+              child: Text(_isLightOn ? 'Turn Off Light' : 'Turn On Light'),
+              style: ElevatedButton.styleFrom(
+                primary: _isLightOn ? Colors.red : Colors.green,
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 32),
+                textStyle: TextStyle(fontSize: 20),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
